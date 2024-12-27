@@ -43,6 +43,7 @@
 #include <RAII.hpp>
 #include <st25dv64k.h>
 #include <time.h>
+#include "rtos_api.hpp"
 
 namespace {
 void MsgBoxNonBlockInfo(string_view_utf8 txt) {
@@ -222,13 +223,22 @@ void MI_DISABLE_STEP::click(IWindowMenu & /*window_menu*/) {
 /*****************************************************************************/
 
 namespace {
-void do_factory_reset(bool wipe_fw) {
-    auto msg = MsgBoxBase(GuiDefaults::DialogFrameRect, Responses_NONE, 0, nullptr, wipe_fw ? _("Erasing everything,\nit will take some time...") : _("Erasing configuration,\nit will take some time..."));
-    msg.Draw(); // Non-blocking info
+void st25dv64k_chip_erase() {
     static constexpr uint32_t empty = 0xffffffff;
     for (uint16_t address = 0; address <= (8096 - 4); address += 4) {
         st25dv64k_user_write_bytes(address, &empty, sizeof(empty));
     }
+}
+
+void msg_and_sys_reset() {
+    MsgBoxInfo(_("Reset complete. The system will now restart."), Responses_Ok);
+    sys_reset();
+}
+
+void do_factory_reset(bool wipe_fw) {
+    auto msg = MsgBoxBase(GuiDefaults::DialogFrameRect, Responses_NONE, 0, nullptr, wipe_fw ? _("Erasing everything,\nit will take some time...") : _("Erasing configuration,\nit will take some time..."));
+    msg.Draw(); // Non-blocking info
+    st25dv64k_chip_erase();
     if (wipe_fw) {
         w25x_chip_erase();
 #if BOOTLOADER()
@@ -239,9 +249,43 @@ void do_factory_reset(bool wipe_fw) {
         // Never gets here
 #endif /*BOOTLOADER()*/
     }
-    MsgBoxInfo(_("Reset complete. The system will now restart."), Responses_Ok);
-    sys_reset();
+    msg_and_sys_reset();
 }
+
+#if PRINTER_IS_PRUSA_MK4
+void do_shipping_prep() {
+    auto msg = MsgBoxBase(GuiDefaults::DialogFrameRect, Responses_NONE, 0, nullptr, // a dummy comment to break line by force
+        _("Shipping preparation\n\nErasing configuration\n(but keeping Nextruder type)\nit will take some time..."));
+    msg.Draw(); // Non-blocking info
+
+    bool is_mmu_rework = config_store().is_mmu_rework.get();
+    uint8_t ext_printer_type = config_store().extended_printer_type.get();
+
+    // at this spot, we hope, that no other thread is actually writing into the EEPROM. They can read, even though it doesn't probably happen
+    // we cannot disable task switching here because osDelays stop working ... which is required for erasing the EEPROM
+    st25dv64k_chip_erase();
+    {
+        // disable task switching now while reloading the EEPROM structures
+        CriticalSection critical_section;
+
+        // Build the structures again - this is the tricky part.
+        // What an awful way of force-reinitializing the RAM data structures of config_store
+        // - unfortunately it gobbled up 3KB of code space. It would be nice to find a more subtle impl.
+        using Store = std::remove_cvref_t<decltype(config_store())>;
+        config_store().~Store();
+        new (&config_store()) Store();
+
+        init_config_store();
+        config_store().perform_config_check();
+    }
+    // write back the flags we want to keep
+    config_store().is_mmu_rework.set(is_mmu_rework);
+    config_store().extended_printer_type.set(ext_printer_type);
+
+    msg_and_sys_reset();
+}
+#endif
+
 } // anonymous namespace
 
 MI_FACTORY_SOFT_RESET::MI_FACTORY_SOFT_RESET()
@@ -271,6 +315,18 @@ void MI_FACTORY_HARD_RESET::click(IWindowMenu & /*window_menu*/) {
         do_factory_reset(true);
     }
 }
+
+#if PRINTER_IS_PRUSA_MK4
+MI_FACTORY_SHIPPING_PREP::MI_FACTORY_SHIPPING_PREP()
+    : IWindowMenuItem(_(label), nullptr, is_enabled_t::yes, is_hidden_t::no) {
+}
+
+void MI_FACTORY_SHIPPING_PREP::click(IWindowMenu & /*window_menu*/) {
+    if (MsgBoxWarning(_("This operation cannot be undone. Current configuration will be lost!\nDo you want to perform the Factory Shipping Preparation procedure?"), Responses_YesNo, 1) == Response::Yes) {
+        do_shipping_prep();
+    }
+}
+#endif
 
 /*****************************************************************************/
 // MI_ENTER_DFU

@@ -12,6 +12,7 @@ if(BOARD MATCHES ".*BUDDY")
             crc32_zlib.cpp
             data_exchange.cpp
             enum_array.cpp
+            error_code_mangle.cpp
             ExtInterruptHandler.cpp
             filename_type.cpp
             filepath_operation.cpp
@@ -22,7 +23,6 @@ if(BOARD MATCHES ".*BUDDY")
             general_response.cpp
             hardware_serial.cpp
             heap.cpp
-            help_urls.cpp
             homing_reporter.cpp
             hwio_pindef_check.cpp
             i2c.cpp
@@ -48,6 +48,7 @@ if(BOARD MATCHES ".*BUDDY")
             Pin.cpp
             ping_manager.cpp
             print_utils.cpp
+            printer_model.cpp
             probe_analysis.cpp
             random_hw.cpp
             rw_mutex.cpp
