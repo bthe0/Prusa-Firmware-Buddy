@@ -900,11 +900,8 @@ void cleanup_probe(const xy_pos_t &rect_min, const xy_pos_t &rect_max) {
         should_continue = false;
         break;
       }
-      if (!std::isnan(result)) {
-        consecutive_clean_cnt += 1;
-      } else {
-        consecutive_clean_cnt = 0;
-      }
+      
+      consecutive_clean_cnt += 1;
 
       // exit in case the probe was successfull
       if (consecutive_clean_cnt >= required_clean_cnt) {
